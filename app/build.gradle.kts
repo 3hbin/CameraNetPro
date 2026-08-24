@@ -53,5 +53,5 @@ dependencies {
 
     implementation("com.google.mlkit:face-detection:16.1.6")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
-    implementation("com.google.mlkit:pose-detection:18.0.0")
+    implementation("com.google.mlkit:pose-detection:18.0.0-beta5")
 }
