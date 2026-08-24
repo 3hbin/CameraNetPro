@@ -74,6 +74,7 @@ import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
  * 8. AF/AE Lock (long press preview 1.5s)
  * 9. Night mode
  * 10. Silent shutter
+ * 11. Pose Detection real-time
  */
 class MainActivity : AppCompatActivity(), SensorEventListener {
 
@@ -131,7 +132,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var isAutoWhiteBalance = true
     private var isZoomSlider = true
     private val qrScanner: BarcodeScanner = BarcodeScanning.getClient()
-    private val poseDetector: PoseDetector = PoseDetection.getClient(PoseDetectorOptions.Builder().setDetectorMode(PoseDetectorOptions.STREAM_MODE).build())
+    private val poseDetector = PoseDetection.getClient(
+        PoseDetectorOptions.Builder()
+            .setDetectorMode(PoseDetectorOptions.STREAM_MODE)
+            .build()
+    )
 
     // Long press for AF/AE lock
     private val longPressHandler = Handler(Looper.getMainLooper())
@@ -348,7 +353,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     13 -> { isTorch = !isTorch; camera?.cameraControl?.enableTorch(isTorch) }
                     14 -> isAutoWhiteBalance = !isAutoWhiteBalance
                 }
-                Toast.makeText(this, "Đã cập nhật: ${items[which].substringAfter('. ').substringBefore(':')}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Đã cập nhật: ${items[which].substringAfter(". ").substringBefore(":")}", Toast.LENGTH_SHORT).show()
             }
             .setPositiveButton("Đóng", null)
             .show()
@@ -483,10 +488,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         imageAnalysis = if (qrAnalyzerEnabled || heightAnalyzerEnabled) {
             ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                 .build()
                 .also { analysis ->
                     analysis.setAnalyzer(cameraExecutor) { proxy ->
-                        if (qrAnalyzerEnabled) analyzeQr(proxy) else if (heightAnalyzerEnabled) analyzeHeight(proxy) else proxy.close()
+                        when {
+                            qrAnalyzerEnabled -> analyzeQr(proxy)
+                            heightAnalyzerEnabled -> analyzeHeight(proxy)
+                            else -> proxy.close()
+                        }
                     }
                 }
         } else null
@@ -494,9 +504,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         try {
             provider.unbindAll()
             camera = when {
-                currentMode == 3 -> provider.bindToLifecycle(this, selector, preview, videoCapture)
-                imageAnalysis != null -> provider.bindToLifecycle(this, selector, preview, imageCapture, imageAnalysis)
-                else -> provider.bindToLifecycle(this, selector, preview, imageCapture)
+                currentMode == 3 -> provider.bindToLifecycle(this, selector, preview, videoCapture!!)
+                imageAnalysis != null -> provider.bindToLifecycle(this, selector, preview, imageCapture!!, imageAnalysis!!)
+                else -> provider.bindToLifecycle(this, selector, preview, imageCapture!!)
             }
             applyExposure()
         } catch (e: Exception) {
@@ -542,7 +552,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val mediaImage = proxy.image ?: run { proxy.close(); return }
         val image = InputImage.fromMediaImage(mediaImage, proxy.imageInfo.rotationDegrees)
         poseDetector.process(image)
-            .addOnSuccessListener { pose -> estimateHeight(pose, proxy.width, proxy.height) }
+            .addOnSuccessListener { pose: Pose ->
+                estimateHeight(pose, proxy.width, proxy.height)
+            }
             .addOnCompleteListener { proxy.close() }
     }
 
@@ -711,6 +723,24 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     Toast.makeText(this@MainActivity, "Đã lưu ($modeTag)", Toast.LENGTH_SHORT).show()
                 }
             })
+    }
+
+    // ==================== SENSOR ====================
+    override fun onSensorChanged(event: SensorEvent?) {
+        // Accelerometer for level indicator
+        if (event?.sensor?.type == Sensor.TYPE_ACCELEROMETER) {
+            try {
+                val x = event.values[0]
+                val roll = Math.toDegrees(kotlin.math.atan2(event.values[1].toDouble(), event.values[2].toDouble())).toFloat()
+                binding.levelBar.rotation = roll
+            } catch (e: Exception) {
+                Log.e("Sensor", "Error processing accelerometer", e)
+            }
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+        // Not needed
     }
 
     // ==================== LIFECYCLE ====================
